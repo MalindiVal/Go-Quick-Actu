@@ -3,7 +3,7 @@ package rss
 import (
 	"time"
 
-	"rss-aggregator/models"
+	"goquickactu/models"
 
 	"github.com/mmcdole/gofeed"
 )

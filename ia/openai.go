@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"log"
 	"strings"
 
 	"github.com/openai/openai-go/v3"
@@ -40,6 +41,8 @@ Article :
 		Temperature: openai.Float(0.2),
 	})
 
+	log.Printf("OpenAI response: %+v", resp)
+
 	if err != nil {
 		return nil, err
 	}
@@ -55,6 +58,7 @@ Article :
 	// Nettoyage sécurité
 	for i := range parsed.Keywords {
 		parsed.Keywords[i] = strings.TrimSpace(parsed.Keywords[i])
+		log.Printf("Extracted keyword: %s", parsed.Keywords[i])
 	}
 
 	return parsed.Keywords, nil
