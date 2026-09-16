@@ -7,6 +7,8 @@ import (
 	"sync"
 
 	_ "github.com/lib/pq"
+
+	"goquickactu/sources"
 )
 
 var (
@@ -58,6 +60,11 @@ func Connect() (*sql.DB, error) {
 			return
 		}
 
+		if err := seedSources(conn); err != nil {
+			poolErr = err
+			return
+		}
+
 		pool = conn
 	})
 
@@ -65,16 +72,56 @@ func Connect() (*sql.DB, error) {
 }
 
 func initSchema(conn *sql.DB) error {
-	_, err := conn.Exec(`
-		CREATE TABLE IF NOT EXISTS articles (
+	statements := []string{
+		`CREATE TABLE IF NOT EXISTS sources (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			url TEXT NOT NULL UNIQUE,
+			political_leaning TEXT
+		)`,
+		`CREATE TABLE IF NOT EXISTS keywords (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE
+		)`,
+		`CREATE TABLE IF NOT EXISTS articles (
 			id SERIAL PRIMARY KEY,
 			title TEXT NOT NULL,
 			link TEXT NOT NULL UNIQUE,
 			description TEXT,
-			source TEXT,
-			published_at TIMESTAMPTZ,
-			keywords TEXT[]
-		)
-	`)
-	return err
+			source_id INTEGER REFERENCES sources(id),
+			published_at TIMESTAMPTZ
+		)`,
+		`CREATE TABLE IF NOT EXISTS article_keywords (
+			article_id INTEGER NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+			keyword_id INTEGER NOT NULL REFERENCES keywords(id) ON DELETE CASCADE,
+			PRIMARY KEY (article_id, keyword_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles (published_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_source_id ON articles (source_id)`,
+	}
+
+	for _, stmt := range statements {
+		if _, err := conn.Exec(stmt); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// seedSources keeps the "sources" table in sync with the application's
+// canonical feed list (goquickactu/sources), so the two never drift apart.
+func seedSources(conn *sql.DB) error {
+	for _, s := range sources.FeedSources {
+		if _, err := conn.Exec(`
+			INSERT INTO sources (name, url, political_leaning)
+			VALUES ($1, $2, $3)
+			ON CONFLICT (name) DO UPDATE SET
+				url = EXCLUDED.url,
+				political_leaning = EXCLUDED.political_leaning
+		`, s.Name, s.URL, s.PoliticalLeaning); err != nil {
+			return err
+		}
+	}
+	return nil
 }

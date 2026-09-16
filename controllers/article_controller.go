@@ -10,12 +10,13 @@ import (
 	"goquickactu/ia"
 	"goquickactu/models"
 	"goquickactu/rss"
+	"goquickactu/sources"
 )
 
 func AggregateArticles(c *gin.Context) {
 	var errorsCount int
 
-	for _, source := range feedSources {
+	for _, source := range sources.FeedSources {
 		items, err := rss.FetchFeed(source.URL)
 		if err != nil {
 			log.Printf("failed to fetch feed %s: %v", source.URL, err)
@@ -60,10 +61,6 @@ func GetArticles(c *gin.Context) {
 
 	if articles == nil {
 		articles = []models.Article{}
-	}
-
-	for i := range articles {
-		articles[i].PoliticalLeaning = politicalLeaningBySource[articles[i].Source]
 	}
 
 	c.JSON(http.StatusOK, articles)
