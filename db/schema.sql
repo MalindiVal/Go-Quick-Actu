@@ -25,12 +25,19 @@ CREATE TABLE IF NOT EXISTS keywords (
     name TEXT NOT NULL UNIQUE
 );
 
+-- Sujets d'actualité (taxonomie fixe), utilisés pour classer les articles.
+CREATE TABLE IF NOT EXISTS topics (
+    id   SERIAL PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE
+);
+
 CREATE TABLE IF NOT EXISTS articles (
     id           SERIAL PRIMARY KEY,
     title        TEXT NOT NULL,
     link         TEXT NOT NULL UNIQUE,
     description  TEXT,
     source_id    INTEGER REFERENCES sources(id),
+    topic_id     INTEGER REFERENCES topics(id),
     published_at TIMESTAMPTZ
 );
 
@@ -46,6 +53,9 @@ CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles (published_at D
 
 -- Filtrage par source.
 CREATE INDEX IF NOT EXISTS idx_articles_source_id ON articles (source_id);
+
+-- Filtrage par sujet.
+CREATE INDEX IF NOT EXISTS idx_articles_topic_id ON articles (topic_id);
 
 -- Données de référence : sources RSS agrégées par l'application.
 -- (Doit rester aligné avec sources/sources.go, seule source de vérité ;
@@ -64,3 +74,19 @@ INSERT INTO sources (name, url, political_leaning) VALUES
 ON CONFLICT (name) DO UPDATE SET
     url               = EXCLUDED.url,
     political_leaning = EXCLUDED.political_leaning;
+
+-- Données de référence : sujets d'actualité.
+-- (Doit rester aligné avec topics/topics.go, seule source de vérité ;
+-- l'application les réinjecte de toute façon à chaque démarrage.)
+INSERT INTO topics (name) VALUES
+    ('Politique'),
+    ('Économie'),
+    ('International'),
+    ('Société'),
+    ('Sport'),
+    ('Culture'),
+    ('Sciences & Tech'),
+    ('Santé'),
+    ('Environnement'),
+    ('Faits divers')
+ON CONFLICT (name) DO NOTHING;

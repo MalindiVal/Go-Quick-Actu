@@ -26,13 +26,14 @@ func AggregateArticles(c *gin.Context) {
 		log.Printf("Fetched %d items from %s", len(items), source.URL)
 
 		for _, item := range items {
-			keywords, err := ia.ExtractKeywords(item.Description)
+			keywords, topic, err := ia.AnalyzeContent(item.Description)
 			if err != nil {
-				log.Printf("failed to extract keywords for %s: %v", item.Link, err)
+				log.Printf("failed to analyze content for %s: %v", item.Link, err)
 			}
 
 			article := rss.MapToArticle(item, source.Name)
 			article.Keywords = keywords
+			article.Topic = topic
 
 			if err := articledao.SaveArticle(article); err != nil {
 				log.Printf("failed to save article %s: %v", article.Link, err)

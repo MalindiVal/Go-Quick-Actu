@@ -2,6 +2,7 @@ package articledao
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/lib/pq"
 
@@ -27,17 +28,33 @@ func SaveArticle(article models.Article) error {
 		return err
 	}
 
+	var topicID sql.NullInt64
+	if article.Topic != "" {
+		var id int64
+		err := tx.QueryRowContext(ctx, `SELECT id FROM topics WHERE name = $1`, article.Topic).Scan(&id)
+		switch {
+		case err == nil:
+			topicID = sql.NullInt64{Int64: id, Valid: true}
+		case err == sql.ErrNoRows:
+			// Unknown topic (e.g. a stale AI classification): leave the
+			// article uncategorized rather than failing the whole save.
+		default:
+			return err
+		}
+	}
+
 	var articleID int
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO articles (title, link, description, source_id, published_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO articles (title, link, description, source_id, topic_id, published_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (link) DO UPDATE SET
 			title = EXCLUDED.title,
 			description = EXCLUDED.description,
 			source_id = EXCLUDED.source_id,
+			topic_id = EXCLUDED.topic_id,
 			published_at = EXCLUDED.published_at
 		RETURNING id
-	`, article.Title, article.Link, article.Description, sourceID, article.PublishedAt).Scan(&articleID)
+	`, article.Title, article.Link, article.Description, sourceID, topicID, article.PublishedAt).Scan(&articleID)
 	if err != nil {
 		return err
 	}
@@ -70,26 +87,31 @@ func SaveArticle(article models.Article) error {
 	return tx.Commit()
 }
 
+const selectArticlesBase = `
+	SELECT
+		a.title,
+		a.link,
+		a.description,
+		s.name AS source,
+		s.political_leaning,
+		t.name AS topic,
+		a.published_at,
+		COALESCE(array_agg(k.name) FILTER (WHERE k.name IS NOT NULL), '{}') AS keywords
+	FROM articles a
+	JOIN sources s ON s.id = a.source_id
+	LEFT JOIN topics t ON t.id = a.topic_id
+	LEFT JOIN article_keywords ak ON ak.article_id = a.id
+	LEFT JOIN keywords k ON k.id = ak.keyword_id
+`
+
 func GetAllArticles() ([]models.Article, error) {
 	conn, err := db.Connect()
 	if err != nil {
 		return nil, err
 	}
 
-	rows, err := conn.QueryContext(context.Background(), `
-		SELECT
-			a.title,
-			a.link,
-			a.description,
-			s.name AS source,
-			s.political_leaning,
-			a.published_at,
-			COALESCE(array_agg(k.name) FILTER (WHERE k.name IS NOT NULL), '{}') AS keywords
-		FROM articles a
-		JOIN sources s ON s.id = a.source_id
-		LEFT JOIN article_keywords ak ON ak.article_id = a.id
-		LEFT JOIN keywords k ON k.id = ak.keyword_id
-		GROUP BY a.id, s.name, s.political_leaning
+	rows, err := conn.QueryContext(context.Background(), selectArticlesBase+`
+		GROUP BY a.id, s.name, s.political_leaning, t.name
 		ORDER BY a.published_at DESC
 	`)
 	if err != nil {
@@ -97,20 +119,56 @@ func GetAllArticles() ([]models.Article, error) {
 	}
 	defer rows.Close()
 
+	return scanArticles(rows)
+}
+
+// GetArticlesByKeyword returns, most recent first, up to limit articles
+// that have at least one keyword matching keyword (case-insensitive),
+// across all their sources - typically used to gather the various
+// articles covering the same news story before synthesizing them.
+func GetArticlesByKeyword(keyword string, limit int) ([]models.Article, error) {
+	conn, err := db.Connect()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := conn.QueryContext(context.Background(), selectArticlesBase+`
+		WHERE a.id IN (
+			SELECT ak2.article_id
+			FROM article_keywords ak2
+			JOIN keywords k2 ON k2.id = ak2.keyword_id
+			WHERE k2.name ILIKE $1
+		)
+		GROUP BY a.id, s.name, s.political_leaning, t.name
+		ORDER BY a.published_at DESC
+		LIMIT $2
+	`, keyword, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanArticles(rows)
+}
+
+func scanArticles(rows *sql.Rows) ([]models.Article, error) {
 	var articles []models.Article
 	for rows.Next() {
 		var article models.Article
+		var topic sql.NullString
 		if err := rows.Scan(
 			&article.Title,
 			&article.Link,
 			&article.Description,
 			&article.Source,
 			&article.PoliticalLeaning,
+			&topic,
 			&article.PublishedAt,
 			pq.Array(&article.Keywords),
 		); err != nil {
 			return nil, err
 		}
+		article.Topic = topic.String
 		articles = append(articles, article)
 	}
 

@@ -10,4 +10,5 @@ type Article struct {
 	PublishedAt      time.Time `json:"published_at"`
 	Keywords         []string  `json:"keywords"`
 	PoliticalLeaning string    `json:"political_leaning,omitempty"`
+	Topic            string    `json:"topic,omitempty"`
 }

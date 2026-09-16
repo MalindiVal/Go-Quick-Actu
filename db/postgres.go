@@ -9,6 +9,7 @@ import (
 	_ "github.com/lib/pq"
 
 	"goquickactu/sources"
+	"goquickactu/topics"
 )
 
 var (
@@ -65,6 +66,11 @@ func Connect() (*sql.DB, error) {
 			return
 		}
 
+		if err := seedTopics(conn); err != nil {
+			poolErr = err
+			return
+		}
+
 		pool = conn
 	})
 
@@ -83,12 +89,17 @@ func initSchema(conn *sql.DB) error {
 			id SERIAL PRIMARY KEY,
 			name TEXT NOT NULL UNIQUE
 		)`,
+		`CREATE TABLE IF NOT EXISTS topics (
+			id SERIAL PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE
+		)`,
 		`CREATE TABLE IF NOT EXISTS articles (
 			id SERIAL PRIMARY KEY,
 			title TEXT NOT NULL,
 			link TEXT NOT NULL UNIQUE,
 			description TEXT,
 			source_id INTEGER REFERENCES sources(id),
+			topic_id INTEGER REFERENCES topics(id),
 			published_at TIMESTAMPTZ
 		)`,
 		`CREATE TABLE IF NOT EXISTS article_keywords (
@@ -98,6 +109,7 @@ func initSchema(conn *sql.DB) error {
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_published_at ON articles (published_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_articles_source_id ON articles (source_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_articles_topic_id ON articles (topic_id)`,
 	}
 
 	for _, stmt := range statements {
@@ -120,6 +132,21 @@ func seedSources(conn *sql.DB) error {
 				url = EXCLUDED.url,
 				political_leaning = EXCLUDED.political_leaning
 		`, s.Name, s.URL, s.PoliticalLeaning); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// seedTopics keeps the "topics" table in sync with the application's
+// canonical taxonomy (goquickactu/topics), so the two never drift apart.
+func seedTopics(conn *sql.DB) error {
+	for _, name := range topics.Topics {
+		if _, err := conn.Exec(`
+			INSERT INTO topics (name)
+			VALUES ($1)
+			ON CONFLICT (name) DO NOTHING
+		`, name); err != nil {
 			return err
 		}
 	}
