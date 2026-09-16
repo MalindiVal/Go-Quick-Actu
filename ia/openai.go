@@ -3,9 +3,11 @@ package ia
 import (
 	"context"
 	"encoding/json"
-	"os"
+	"fmt"
 	"log"
+	"os"
 	"strings"
+	"time"
 
 	"github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -21,7 +23,8 @@ type KeywordsResponse struct {
 
 func ExtractKeywords(content string) ([]string, error) {
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
 	prompt := `
 Tu es un assistant qui extrait exactement 5 mots-clés pertinents.
@@ -41,17 +44,24 @@ Article :
 		Temperature: openai.Float(0.2),
 	})
 
-	log.Printf("OpenAI response: %+v", resp)
-
 	if err != nil {
 		return nil, err
 	}
 
-	raw := resp.Choices[0].Message.Content
+	log.Printf("OpenAI response: %+v", resp)
+
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("openai: no choices returned")
+	}
+
+	raw := strings.TrimSpace(resp.Choices[0].Message.Content)
+	raw = strings.TrimPrefix(raw, "```json")
+	raw = strings.TrimPrefix(raw, "```")
+	raw = strings.TrimSuffix(raw, "```")
+	raw = strings.TrimSpace(raw)
 
 	var parsed KeywordsResponse
-	err = json.Unmarshal([]byte(raw), &parsed)
-	if err != nil {
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return nil, err
 	}
 
