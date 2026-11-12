@@ -12,6 +12,6 @@ func SetupRouter() *gin.Engine {
 	r.GET("/sources", controllers.GetSources)
 	r.GET("/topics", controllers.GetTopics)
 	r.GET("/synthesis", controllers.GetSynthesis)
-	r.POST("/aggregate", controllers.AggregateArticles)
+	r.POST("/aggregate", controllers.RequireAPIKey(), controllers.AggregateArticles)
 	return r
 }

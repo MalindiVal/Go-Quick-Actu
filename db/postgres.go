@@ -33,7 +33,7 @@ func dsn() string {
 	host := getEnv("DB_HOST", "localhost")
 	port := getEnv("DB_PORT", "5432")
 	user := getEnv("DB_USER", "postgres")
-	password := getEnv("DB_PASSWORD", "postgres")
+	password := getEnv("DB_PASSWORD", "root")
 	name := getEnv("DB_NAME", "quickactu")
 	sslmode := getEnv("DB_SSLMODE", "disable")
 

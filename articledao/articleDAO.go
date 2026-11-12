@@ -10,7 +10,13 @@ import (
 	"goquickactu/models"
 )
 
-func SaveArticle(article models.Article) error {
+// SaveArticle inserts or updates an article.
+//
+// analyzed tells whether article.Keywords / article.Topic come from a
+// successful AI analysis. When it is false (the analysis failed), only the
+// RSS fields are written: an existing article keeps its topic and keywords
+// instead of having them wiped by a transient AI failure.
+func SaveArticle(article models.Article, analyzed bool) error {
 	conn, err := db.Connect()
 	if err != nil {
 		return err
@@ -51,12 +57,16 @@ func SaveArticle(article models.Article) error {
 			title = EXCLUDED.title,
 			description = EXCLUDED.description,
 			source_id = EXCLUDED.source_id,
-			topic_id = EXCLUDED.topic_id,
+			topic_id = CASE WHEN $7::boolean THEN EXCLUDED.topic_id ELSE articles.topic_id END,
 			published_at = EXCLUDED.published_at
 		RETURNING id
-	`, article.Title, article.Link, article.Description, sourceID, topicID, article.PublishedAt).Scan(&articleID)
+	`, article.Title, article.Link, article.Description, sourceID, topicID, article.PublishedAt, analyzed).Scan(&articleID)
 	if err != nil {
 		return err
+	}
+
+	if !analyzed {
+		return tx.Commit()
 	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM article_keywords WHERE article_id = $1`, articleID); err != nil {
@@ -85,6 +95,37 @@ func SaveArticle(article models.Article) error {
 	}
 
 	return tx.Commit()
+}
+
+// GetAnalyzedLinks returns the links of the articles that already have
+// keywords, i.e. that a previous aggregation analyzed successfully, so the
+// aggregation can skip them instead of paying for a new AI call.
+func GetAnalyzedLinks() (map[string]bool, error) {
+	conn, err := db.Connect()
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := conn.QueryContext(context.Background(), `
+		SELECT DISTINCT a.link
+		FROM articles a
+		JOIN article_keywords ak ON ak.article_id = a.id
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	links := make(map[string]bool)
+	for rows.Next() {
+		var link string
+		if err := rows.Scan(&link); err != nil {
+			return nil, err
+		}
+		links[link] = true
+	}
+
+	return links, rows.Err()
 }
 
 const selectArticlesBase = `
